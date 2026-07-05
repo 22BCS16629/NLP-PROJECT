@@ -1,0 +1,77 @@
+import streamlit as st
+import re
+import pandas as pd
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+
+# Page configuration
+st.set_page_config(
+    page_title="Research Paper Recommendation App",
+    page_icon="🤖",
+    layout="centered"
+)
+
+# Load data
+@st.cache_data
+def load_data():
+    file_id = '1h3am3IqWft_2RCaQuaM2u6iE-fPa6DTh'
+    url = f'https://drive.google.com/uc?id={file_id}'
+    df = pd.read_csv(url)
+    return df
+
+# Initialize and fit vectorizers
+@st.cache_resource
+def initialize_vectorizers(df):
+    vectorizer_title = TfidfVectorizer(stop_words='english')
+    vectorizer_abstract = TfidfVectorizer(stop_words='english')
+    tfidf_matrix_title = vectorizer_title.fit_transform(df['titles'])
+    tfidf_matrix_abstract = vectorizer_abstract.fit_transform(df['summaries'])
+    return vectorizer_title, tfidf_matrix_title, vectorizer_abstract, tfidf_matrix_abstract
+
+def find_similar_papers(query, vectorizer_title, tfidf_matrix_title,
+                         vectorizer_abstract, tfidf_matrix_abstract, top_n=5):
+    query_vec_title = vectorizer_title.transform([query])
+    query_vec_abstract = vectorizer_abstract.transform([query])
+    cosine_sim_title = cosine_similarity(query_vec_title, tfidf_matrix_title).flatten()
+    cosine_sim_abstract = cosine_similarity(query_vec_abstract, tfidf_matrix_abstract).flatten()
+    combined_sim = (cosine_sim_title + cosine_sim_abstract) / 2
+    most_similar_indices = combined_sim.argsort()[-top_n:][::-1]
+    return df.iloc[most_similar_indices]
+
+def highlight_terms(text, terms, color='yellow'):
+    escaped_terms = [re.escape(term) for term in terms.split()]
+    pattern = re.compile(r'(' + '|'.join(escaped_terms) + r')', re.IGNORECASE)
+    highlighted_text = pattern.sub(
+        r'<span style="background-color: {};">\1</span>'.format(color), text
+    )
+    return highlighted_text
+
+# Main app
+st.title('🔬 Research Paper Recommender')
+st.markdown("Find relevant ML research papers based on your topic of interest.")
+
+df = load_data()
+vectorizer_title, tfidf_matrix_title, vectorizer_abstract, tfidf_matrix_abstract = initialize_vectorizers(df)
+
+user_query = st.text_input("What topic are you interested in?",
+                            placeholder="e.g. Transformers in Computer Vision")
+
+if st.button('Find Papers'):
+    if user_query:
+        with st.spinner('Finding relevant papers...'):
+            results = find_similar_papers(
+                user_query,
+                vectorizer_title, tfidf_matrix_title,
+                vectorizer_abstract, tfidf_matrix_abstract
+            )
+        st.success(f'Top {len(results)} papers found!')
+        for index, result in results.iterrows():
+            highlighted_abstract = highlight_terms(
+                result['summaries'], user_query, color='yellow'
+            )
+            st.markdown(f"### 📄 {result['titles']}")
+            st.markdown('**Abstract:** ' + highlighted_abstract,
+                       unsafe_allow_html=True)
+            st.divider()
+    else:
+        st.warning('Please enter a topic to search for papers.')
